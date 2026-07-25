@@ -58,6 +58,53 @@ export const PhotoStripBuilder: React.FC<PhotoStripBuilderProps> = ({
     }
   };
 
+  // Helper to draw an image onto canvas with fallback to base64 original data URL
+  const drawImageOnCanvas = (
+    ctx: CanvasRenderingContext2D,
+    photo: CapturedPhoto,
+    x: number,
+    y: number,
+    w: number,
+    h: number
+  ) => {
+    // 1. Draw white photo backing border
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(x - 4, y - 4, w + 8, h + 8);
+
+    const img = new Image();
+    
+    // Function to render image onto canvas
+    const draw = () => {
+      ctx.save();
+      ctx.drawImage(img, x, y, w, h);
+      ctx.restore();
+    };
+
+    // Handle image loading with automatic fallback to base64 originalDataUrl
+    img.onload = () => {
+      draw();
+    };
+
+    img.onerror = () => {
+      // If external processedUrl fails, fallback to local base64 originalDataUrl
+      if (img.src !== photo.originalDataUrl) {
+        const fallbackImg = new Image();
+        fallbackImg.onload = () => {
+          ctx.save();
+          ctx.drawImage(fallbackImg, x, y, w, h);
+          ctx.restore();
+        };
+        fallbackImg.src = photo.originalDataUrl;
+      }
+    };
+
+    // Prefer original base64 for instant 100% reliable local canvas rendering without CORS issues
+    img.src = photo.originalDataUrl || photo.processedUrl || '';
+    if (img.complete && img.naturalWidth !== 0) {
+      draw();
+    }
+  };
+
   const renderStripCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -101,18 +148,8 @@ export const PhotoStripBuilder: React.FC<PhotoStripBuilderProps> = ({
 
       gridCoords.forEach((coord, i) => {
         const photo = selectedList[i];
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(coord.x - 4, coord.y - 4, cellWidth + 8, cellHeight + 8);
-
         if (photo) {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.src = photo.processedUrl || photo.originalDataUrl;
-          if (img.complete && img.naturalWidth !== 0) {
-            ctx.drawImage(img, coord.x, coord.y, cellWidth, cellHeight);
-          } else {
-            img.onload = () => ctx.drawImage(img, coord.x, coord.y, cellWidth, cellHeight);
-          }
+          drawImageOnCanvas(ctx, photo, coord.x, coord.y, cellWidth, cellHeight);
         } else {
           ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
           ctx.fillRect(coord.x, coord.y, cellWidth, cellHeight);
@@ -174,19 +211,7 @@ export const PhotoStripBuilder: React.FC<PhotoStripBuilderProps> = ({
         ctx.fillText('[ SELECT WEBCAM SHOTS BELOW ]', stripWidth / 2, currentY + photoHeight / 2);
       } else {
         selectedList.forEach((photo) => {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.src = photo.processedUrl || photo.originalDataUrl;
-
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(padding - 4, currentY - 4, innerWidth + 8, photoHeight + 8);
-
-          if (img.complete && img.naturalWidth !== 0) {
-            ctx.drawImage(img, padding, currentY, innerWidth, photoHeight);
-          } else {
-            img.onload = () => ctx.drawImage(img, padding, currentY, innerWidth, photoHeight);
-          }
-
+          drawImageOnCanvas(ctx, photo, padding, currentY, innerWidth, photoHeight);
           currentY += photoHeight + gap;
         });
       }
@@ -332,7 +357,14 @@ export const PhotoStripBuilder: React.FC<PhotoStripBuilderProps> = ({
                             : 'border-[#1e2333] opacity-60 hover:opacity-100'
                         }`}
                       >
-                        <img src={photo.processedUrl || photo.originalDataUrl} alt={`Shot ${idx}`} className="w-full h-full object-cover" />
+                        <img
+                          src={photo.originalDataUrl || photo.processedUrl}
+                          alt={`Shot ${idx}`}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = photo.originalDataUrl;
+                          }}
+                        />
                         {isSelected && (
                           <div className="absolute top-1 right-1 p-0.5 rounded bg-cyan-500 text-slate-950 font-bold">
                             <Check className="w-3 h-3" />
