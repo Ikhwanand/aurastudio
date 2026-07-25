@@ -58,7 +58,7 @@ export const PhotoStripBuilder: React.FC<PhotoStripBuilderProps> = ({
     }
   };
 
-  // Helper to draw an image onto canvas with fallback to base64 original data URL
+  // Helper to draw an image onto canvas with active CSS filter baked in or AI processed image
   const drawImageOnCanvas = (
     ctx: CanvasRenderingContext2D,
     photo: CapturedPhoto,
@@ -71,38 +71,51 @@ export const PhotoStripBuilder: React.FC<PhotoStripBuilderProps> = ({
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(x - 4, y - 4, w + 8, h + 8);
 
-    const img = new Image();
-    
-    // Function to render image onto canvas
-    const draw = () => {
-      ctx.save();
-      ctx.drawImage(img, x, y, w, h);
-      ctx.restore();
-    };
-
-    // Handle image loading with automatic fallback to base64 originalDataUrl
-    img.onload = () => {
-      draw();
-    };
-
-    img.onerror = () => {
-      // If external processedUrl fails, fallback to local base64 originalDataUrl
-      if (img.src !== photo.originalDataUrl) {
-        const fallbackImg = new Image();
-        fallbackImg.onload = () => {
-          ctx.save();
-          ctx.drawImage(fallbackImg, x, y, w, h);
-          ctx.restore();
-        };
-        fallbackImg.src = photo.originalDataUrl;
+    const drawOriginalWithFilter = () => {
+      const origImg = new Image();
+      origImg.onload = () => {
+        ctx.save();
+        if (photo.appliedFilter && photo.appliedFilter.cssFilter) {
+          ctx.filter = photo.appliedFilter.cssFilter;
+        }
+        ctx.drawImage(origImg, x, y, w, h);
+        ctx.restore();
+      };
+      origImg.src = photo.originalDataUrl;
+      if (origImg.complete && origImg.naturalWidth !== 0) {
+        ctx.save();
+        if (photo.appliedFilter && photo.appliedFilter.cssFilter) {
+          ctx.filter = photo.appliedFilter.cssFilter;
+        }
+        ctx.drawImage(origImg, x, y, w, h);
+        ctx.restore();
       }
     };
 
-    // Prefer original base64 for instant 100% reliable local canvas rendering without CORS issues
-    img.src = photo.originalDataUrl || photo.processedUrl || '';
-    if (img.complete && img.naturalWidth !== 0) {
-      draw();
+    // If AI processed image URL exists, attempt to draw AI photo first
+    if (photo.processedUrl && photo.processedUrl.startsWith('http')) {
+      const aiImg = new Image();
+      aiImg.crossOrigin = 'anonymous';
+      aiImg.onload = () => {
+        ctx.save();
+        ctx.drawImage(aiImg, x, y, w, h);
+        ctx.restore();
+      };
+      aiImg.onerror = () => {
+        // Fallback to original webcam photo with baked-in CSS filter
+        drawOriginalWithFilter();
+      };
+      aiImg.src = photo.processedUrl;
+      if (aiImg.complete && aiImg.naturalWidth !== 0) {
+        ctx.save();
+        ctx.drawImage(aiImg, x, y, w, h);
+        ctx.restore();
+        return;
+      }
     }
+
+    // Default: Draw original webcam photo with active CSS filter baked directly into Canvas
+    drawOriginalWithFilter();
   };
 
   const renderStripCanvas = useCallback(() => {
@@ -361,6 +374,7 @@ export const PhotoStripBuilder: React.FC<PhotoStripBuilderProps> = ({
                           src={photo.originalDataUrl || photo.processedUrl}
                           alt={`Shot ${idx}`}
                           className="w-full h-full object-cover"
+                          style={{ filter: photo.appliedFilter?.cssFilter || 'none' }}
                           onError={(e) => {
                             (e.target as HTMLImageElement).src = photo.originalDataUrl;
                           }}
